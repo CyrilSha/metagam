@@ -1,0 +1,134 @@
+0. Установить debian squeeze. На более свежей версии тоже должно завестись, по крайней мере у меня на рабочей станции оно работает. Но может потребовать пересборки/доработки пакетов напильником. 
+
+1. export PYTHONPATH=/home/mg 
+
+2. Установка ключа:
+# aptitude install libwww-perl
+# lwp-request http://aml.rulezz.ru/aml.pgp | apt-key add -
+# lwp-request http://nginx.org/keys/nginx_signing.key | apt-key add -
+3. Репозитарии с необходимыми пакетами подключается к apt через /etc/apt/sources.list:
+deb http://ftp.us.debian.org/debian squeeze main contrib non-free
+deb http://deb.rulezz.ru/debian/ aml main
+deb http://backports.debian.org/debian-backports/ squeeze-backports main contrib non-free
+deb http://security.debian.org/ squeeze/updates main non-free contrib
+deb http://ftp.ru.debian.org/debian/ squeeze-updates main non-free contrib
+deb http://nginx.org/packages/debian/ squeeze nginx
+4. Необходимые пакеты для фронтенда:
+# aptitude install memcached nginx vim rsync screen psmisc python2.6
+5. Необходимые пакеты для бэкенда:
+# aptitude install python-minimal python2.6 concurrence python-template \
+  python-cassandra jsgettext gettext make python-imaging vim rsync python-adns \
+  python-whois python-stemmer python-cssutils realpath
+# aptitude install -t lenny-backports python-support
+6. Необходимые пакеты для базы данных:
+# aptitude install cassandra vim rsync screen psmisc python2.6
+7. Сделайте каталог /home/mg и дайте к нему доступ нужному пользователю 
+
+8. cd /home/mg && git clone https://github.com/JoyTeam/metagam.git . 
+
+9. Создаётся файл /etc/nginx/sites-available/metagam
+include "/etc/nginx/nginx-metagam.conf";
+
+server {
+        listen 0.0.0.0:80;
+        server_name www.mmoconstructor.local mmoconstructor.local;
+        charset off;
+        root /home/mg/static;
+        client_max_body_size 10m;
+
+        location ~ ^/st/([0-9-]+/|) {
+                root /home/mg/static/;
+                rewrite ^/st/([0-9-]+/|)(.+)$ /$2 break;
+                access_log /var/log/nginx/mmoconstructor-static.log combined;
+                expires 3M;
+        }
+
+        location ~ ^/st-mg/([0-9-]+/|) {
+                root /home/mg/static/;
+                rewrite ^/st-mg/([0-9-]+/|)(.+)$ /$2 break;
+                access_log /var/log/nginx/mmoconstructor-static.log combined;
+                expires 3M;
+        }
+
+        location = /favicon.ico {
+                root /home/mg/static/;
+                access_log /var/log/nginx/mmoconstructor-static.log combined;
+                expires 3M;
+        }
+
+        location /rpl {
+                proxy_pass http://localhost:8088;
+                proxy_read_timeout 200;
+                access_log /var/log/nginx/mmoconstructor-realplexor.log combined;
+        }
+
+        location / {
+                proxy_pass http://metagam;
+                proxy_set_header X-Real-Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_read_timeout 200;
+                access_log /var/log/nginx/mmoconstructor.log combined;
+        }
+}
+10. При небольшой установке нужно развернуть локальное webdav-хранилище:
+server {
+        listen 0.0.0.0:80;
+        server_name storage;
+        client_max_body_size 20m;
+        location / {
+                root /home/webdav;
+                client_body_temp_path /tmp;
+                dav_methods PUT DELETE MKCOL COPY MOVE;
+                create_full_put_path on;
+                dav_access user:rw group:rw all:r;
+                location ~ \.(html|htm)$ {
+                        allow 127.0.0.1;
+                        allow 10.0.0.0/8;
+                        deny all;
+                }
+                limit_except GET {
+                        allow 10.0.0.0/8;
+                        allow 127.0.0.1;
+                        deny all;
+                }
+        }
+}
+11. Подготовить каталог:
+# mkdir /home/webdav
+# chown www-data.www-data /home/webdav
+12. Прописать в /etc/hosts адрес сервера storage (где физически находится nginx, отвечающий за webdav). 
+
+13. Сайт активируется:
+# ln -s /etc/nginx/sites-available/metagam /etc/nginx/sites-enabled/metagam
+# /etc/init.d/nginx reload
+14. Пользователю, от чьего имени запускается mg_server, надо дать права на запись в /etc/nginx/nginx-metagam.conf и на выполнение команды:
+/usr/bin/sudo /etc/init.d/nginx reload
+15. Устанавливается пакет realplexor и в файле /etc/realplexor.conf меняются параметры:
+WAIT_TIMEOUT => 20,
+        IN_TIMEOUT => 10,
+        OFFLINE_TIMEOUT => 30,
+        JS_WAIT_URI => '/rpl',
+        JS_DEBUG => 0,
+        VERBOSITY => 0,
+16. Устанавливается пакет stunnel и в файле /etc/stunnel/stunnel.conf прописываются параметры:
+client = yes
+[webmoney_w3s]
+accept  = 85
+connect = w3s.wmtransfer.com:443
+
+[webmoney_login]
+accept  = 86
+connect = login.wmtransfer.com:443
+
+[webmoney_passport]
+accept  = 87
+connect = passport.webmoney.ru:443
+
+[secure_xsolla]
+accept  = 88
+connect = secure.xsolla.com:443
+17. Включаем stunnel через /etc/default/stunnel4:
+ENABLED=1
+18. Из каталога /home/mg запускаем сервер:
+bin/mg_procman
+После этого конструктор должен запуститься и заработать.
